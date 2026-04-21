@@ -103,6 +103,27 @@ export default function POSPage() {
       )}
 
       {pos.step === "idle" && (
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const tag = (e.currentTarget.elements.namedItem("tag") as HTMLInputElement).value.trim();
+            if (tag) handleRFIDRead({ normalized: tag });
+            e.currentTarget.reset();
+          }}
+        >
+          <input
+            name="tag"
+            placeholder="RFID manual (ej: DEMO0001)"
+            className="flex-1 rounded-lg border px-3 py-2 text-sm"
+          />
+          <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700">
+            Buscar
+          </button>
+        </form>
+      )}
+
+      {pos.step === "idle" && (
         <Card className="border-dashed">
           <CardContent className="flex items-center justify-center h-32 text-gray-400">
             Esperando lectura RFID…

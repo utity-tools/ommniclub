@@ -8,37 +8,33 @@ export type AuthContext = {
   role: string | null;
 };
 
-/**
- * Obtiene el contexto de auth desde Clerk y valida que el usuario
- * pertenezca a una organización activa. Lanza si no está autenticado.
- */
 export async function requireAuth(): Promise<AuthContext> {
   const { userId, orgId, orgSlug, orgRole } = await auth();
 
   if (!userId) throw new Error("UNAUTHENTICATED");
-  if (!orgId) throw new Error("NO_ORGANIZATION");
+
+  const clerkOrgId = orgId ?? process.env.DEV_ORG_CLERK_ID;
+  if (!clerkOrgId) throw new Error("NO_ORGANIZATION");
+
+  const org = await prisma.organization.findUnique({
+    where: { clerkOrgId },
+    select: { id: true, slug: true },
+  });
+  if (!org) throw new Error("ORGANIZATION_NOT_FOUND");
 
   return {
     userId,
-    organizationId: orgId,
-    orgSlug: orgSlug ?? null,
+    organizationId: org.id,
+    orgSlug: orgSlug ?? org.slug,
     role: orgRole ?? null,
   };
 }
 
-/**
- * Devuelve un cliente Prisma con RLS configurado para el org del usuario actual.
- * Usar en Server Actions y Route Handlers.
- */
 export async function getOrgDb() {
   const { organizationId } = await requireAuth();
   return getPrismaForOrg(organizationId);
 }
 
-/**
- * Asegura que la Organization existe en nuestra DB, sincronizando desde Clerk.
- * Se llama en el webhook de Clerk `organization.created`.
- */
 export async function syncOrganization(clerkOrgId: string, name: string, slug: string) {
   return prisma.organization.upsert({
     where: { clerkOrgId },
