@@ -1,0 +1,230 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── TENANT ROOT ──────────────────────────────────────────────────────────────
+model Organization {
+  id          String   @id @default(cuid())
+  clerkOrgId  String   @unique @map("clerk_org_id")
+  name        String
+  slug        String   @unique
+  stripeAccountId     String?  @map("stripe_account_id")
+  stripeAccountStatus String   @default("pending") @map("stripe_account_status")
+  applicationFeePercent Decimal @default(0) @map("application_fee_percent") @db.Decimal(5, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users             User[]
+  members           Member[]
+  products          Product[]
+  transactions      Transaction[]
+  accessLogs        AccessLog[]
+  auditEvents       AuditEvent[]
+  subscriptionPlans SubscriptionPlan[]
+
+  @@map("organizations")
+}
+
+// ─── STAFF / ADMINS ───────────────────────────────────────────────────────────
+model User {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  clerkUserId    String   @unique @map("clerk_user_id")
+  email          String
+  role           UserRole @default(STAFF)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  auditEvents  AuditEvent[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+}
+
+// ─── MIEMBROS (SOCIOS) ────────────────────────────────────────────────────────
+model Member {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  // PII cifrado en capa de aplicación con AES-256 antes de persistir
+  documentNumber String       @map("document_number")
+  documentType   String       @default("DNI") @map("document_type")
+  firstName      String       @map("first_name")
+  lastName       String       @map("last_name")
+  email          String?
+  phone          String?
+  rfidTag        String?      @unique @map("rfid_tag")
+  // Wallet
+  walletBalance  Decimal      @default(0) @map("wallet_balance") @db.Decimal(10, 2)
+  monthlyLimit   Decimal      @default(60) @map("monthly_limit") @db.Decimal(10, 2)
+  monthlySpent   Decimal      @default(0) @map("monthly_spent") @db.Decimal(10, 2)
+  spentResetAt   DateTime     @default(now()) @map("spent_reset_at")
+  // Estado
+  status         MemberStatus @default(ACTIVE)
+  planId         String?      @map("plan_id")
+  planExpiresAt  DateTime?    @map("plan_expires_at")
+  // RGPD: soft delete para derecho al olvido
+  deletedAt      DateTime?    @map("deleted_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         SubscriptionPlan? @relation(fields: [planId], references: [id])
+  transactions Transaction[]
+  accessLogs   AccessLog[]
+
+  @@index([organizationId])
+  @@index([rfidTag])
+  @@map("members")
+}
+
+enum MemberStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  DELETED
+}
+
+// ─── PLANES DE SUSCRIPCIÓN ────────────────────────────────────────────────────
+model SubscriptionPlan {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  durationDays   Int      @map("duration_days")
+  price          Decimal  @db.Decimal(10, 2)
+  monthlyLimit   Decimal  @map("monthly_limit") @db.Decimal(10, 2)
+  stripePriceId  String?  @map("stripe_price_id")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      Member[]
+
+  @@index([organizationId])
+  @@map("subscription_plans")
+}
+
+// ─── PRODUCTOS (DISPENSARIO) ──────────────────────────────────────────────────
+model Product {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  sku            String?
+  category       String?
+  description    String?
+  pricePerUnit   Decimal  @map("price_per_unit") @db.Decimal(10, 2)
+  unit           String   @default("g")
+  stockLevel     Decimal  @default(0) @map("stock_level") @db.Decimal(10, 3)
+  lowStockAlert  Decimal  @default(10) @map("low_stock_alert") @db.Decimal(10, 3)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([organizationId])
+  @@map("products")
+}
+
+// ─── LEDGER DE TRANSACCIONES (ACID) ──────────────────────────────────────────
+model Transaction {
+  id             String          @id @default(cuid())
+  organizationId String          @map("organization_id")
+  memberId       String?         @map("member_id")
+  productId      String?         @map("product_id")
+  type           TransactionType
+  quantity       Decimal?        @db.Decimal(10, 3)
+  unitPrice      Decimal?        @map("unit_price") @db.Decimal(10, 2)
+  totalAmount    Decimal         @map("total_amount") @db.Decimal(10, 2)
+  balanceBefore  Decimal?        @map("balance_before") @db.Decimal(10, 2)
+  balanceAfter   Decimal?        @map("balance_after") @db.Decimal(10, 2)
+  stripePaymentIntentId String?  @map("stripe_payment_intent_id")
+  notes          String?
+  staffId        String?         @map("staff_id")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       Member?      @relation(fields: [memberId], references: [id])
+  product      Product?     @relation(fields: [productId], references: [id])
+
+  @@index([organizationId])
+  @@index([memberId])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  DISPENSE
+  WALLET_TOPUP
+  WALLET_CASH
+  SUBSCRIPTION
+  REFUND
+  ADJUSTMENT
+}
+
+// ─── CONTROL DE ACCESO ────────────────────────────────────────────────────────
+model AccessLog {
+  id             String          @id @default(cuid())
+  organizationId String          @map("organization_id")
+  memberId       String          @map("member_id")
+  rfidTag        String          @map("rfid_tag")
+  direction      AccessDirection
+  result         AccessResult
+  // Offline-first: se inserta offline y se sincroniza al recuperar conexión
+  syncedAt       DateTime?       @map("synced_at")
+  deviceId       String?         @map("device_id")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       Member       @relation(fields: [memberId], references: [id])
+
+  @@index([organizationId])
+  @@index([memberId])
+  @@index([createdAt])
+  @@map("access_logs")
+}
+
+enum AccessDirection {
+  ENTRY
+  EXIT
+}
+
+enum AccessResult {
+  GRANTED
+  DENIED_EXPIRED
+  DENIED_SUSPENDED
+  DENIED_NOT_FOUND
+}
+
+// ─── AUDIT LOG INMUTABLE ──────────────────────────────────────────────────────
+// Sin updatedAt por diseño: los registros de auditoría son inmutables
+model AuditEvent {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  userId         String?  @map("user_id")
+  action         String
+  entityType     String?  @map("entity_type")
+  entityId       String?  @map("entity_id")
+  payload        Json?
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_events")
+}
