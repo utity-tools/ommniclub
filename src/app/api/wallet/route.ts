@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { dispense, topUpWallet, getWalletHistory } from "@/lib/wallet/actions";
+import { type NextRequest, NextResponse } from "next/server";
+import { processDispensation, topUpWallet, getWalletHistory } from "@/lib/wallet/actions";
 
 function errorResponse(err: unknown, status = 400) {
   const message = err instanceof Error ? err.message : "Error desconocido";
@@ -8,7 +8,7 @@ function errorResponse(err: unknown, status = 400) {
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = req.nextUrl;
+    const searchParams = await Promise.resolve(req.nextUrl.searchParams);
     const memberId = searchParams.get("memberId");
     if (!memberId) return NextResponse.json({ error: "memberId requerido" }, { status: 400 });
     const page = Math.max(1, Number(searchParams.get("page") ?? 1));
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const action = body.action as string;
 
-    if (action === "dispense") return NextResponse.json(await dispense(body));
+    if (action === "dispense") return NextResponse.json(await processDispensation(body));
     if (action === "topup") return NextResponse.json(await topUpWallet(body));
 
     return NextResponse.json({ error: "action debe ser 'dispense' o 'topup'" }, { status: 400 });
