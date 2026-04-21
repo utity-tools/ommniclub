@@ -1,11 +1,27 @@
 "use server";
 
 import { z } from "zod";
-import { TransactionType } from "@prisma/client";
+import { TransactionType, MemberStatus } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
+
+// ─── ERROR TIPADO ─────────────────────────────────────────────────────────────
+
+export type DispensationErrorCode =
+  | "INSUFFICIENT_FUNDS"
+  | "OUT_OF_STOCK"
+  | "LIMIT_EXCEEDED"
+  | "MEMBER_BLOCKED"
+  | "MEMBER_EXPIRED";
+
+export class DispensationError extends Error {
+  constructor(public readonly code: DispensationErrorCode, message: string) {
+    super(message);
+    this.name = "DispensationError";
+  }
+}
 
 // ─── SCHEMAS ─────────────────────────────────────────────────────────────────
 
@@ -34,72 +50,101 @@ function toDecimal(n: number) {
   return new Prisma.Decimal(n);
 }
 
-/** Reinicia monthlySpent si ha pasado el mes natural. */
-async function resetMonthlySpentIfNeeded(memberId: string, organizationId: string) {
-  const member = await prisma.member.findUniqueOrThrow({ where: { id: memberId, organizationId } });
-  const resetDate = member.spentResetAt;
-  const now = new Date();
-  if (resetDate.getMonth() !== now.getMonth() || resetDate.getFullYear() !== now.getFullYear()) {
-    await prisma.member.update({
-      where: { id: memberId },
-      data: { monthlySpent: 0, spentResetAt: now },
-    });
-  }
+function startOfCurrentMonth(): Date {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
-// ─── DISPENSE — ACID TRANSACTION ─────────────────────────────────────────────
+// ─── PROCESS DISPENSATION — ACID ─────────────────────────────────────────────
 
 /**
- * Dispensación atómica según el Technical Brief:
- * 1. Verificar wallet_balance >= costo
- * 2. Verificar monthly_limit - monthly_spent >= cantidad
- * 3. Decrementar stock del producto
- * 4. Decrementar wallet del socio + incrementar monthly_spent
- * 5. Insertar ledger entry
- * Todo o nada — si falla cualquier paso, se hace rollback.
+ * Dispensación atómica con todas las validaciones de negocio.
+ * Lanza DispensationError con código tipado si alguna restricción no se cumple.
+ *
+ * Orden dentro de la transacción:
+ * 1. Verificar member (org, estado)
+ * 2. Verificar product (org, stock)
+ * 3. Calcular límite mensual desde el ledger (fuente de verdad)
+ * 4. Validar fondos, stock y límite — lanza errores tipados
+ * 5. Escribir: stock ↓ · wallet ↓ · monthlySpent ↑ · ledger entry
  */
-export async function dispense(input: DispenseInput) {
+export async function processDispensation(input: DispenseInput) {
   const { organizationId, userId } = await requireAuth();
   const data = DispenseSchema.parse(input);
 
-  await resetMonthlySpentIfNeeded(data.memberId, organizationId);
-
   const transaction = await prisma.$transaction(async (tx) => {
-    // 1. Bloquear y leer member (SELECT FOR UPDATE implícito en Prisma tx)
-    const member = await tx.member.findUniqueOrThrow({
-      where: { id: data.memberId, organizationId, status: "ACTIVE" },
+    // 1. Leer socio — filtro por org garantiza RLS a nivel de aplicación
+    const member = await tx.member.findUnique({
+      where: { id: data.memberId, organizationId },
     });
 
-    // 2. Bloquear y leer producto
-    const product = await tx.product.findUniqueOrThrow({
+    if (!member) throw new DispensationError("MEMBER_BLOCKED", "Socio no encontrado en esta organización");
+
+    if (member.status === MemberStatus.BLOCKED) {
+      throw new DispensationError("MEMBER_BLOCKED", "El socio está bloqueado");
+    }
+    if (
+      member.status === MemberStatus.EXPIRED ||
+      (member.planExpiresAt && member.planExpiresAt < new Date())
+    ) {
+      throw new DispensationError("MEMBER_EXPIRED", "La membresía del socio ha expirado");
+    }
+
+    // 2. Leer producto — filtro por org garantiza RLS a nivel de aplicación
+    const product = await tx.product.findUnique({
       where: { id: data.productId, organizationId, isActive: true },
     });
 
+    if (!product) throw new DispensationError("OUT_OF_STOCK", "Producto no disponible");
+
     const qty = toDecimal(data.quantity);
     const cost = product.pricePerUnit.mul(qty);
-    const remainingLimit = member.monthlyLimit.sub(member.monthlySpent);
 
-    // 3. Validaciones de negocio
+    // 3. Calcular consumo mensual real desde el ledger (evita race conditions con campo cacheado)
+    const monthlyAggregate = await tx.transaction.aggregate({
+      where: {
+        memberId: data.memberId,
+        organizationId,
+        type: TransactionType.DISPENSE,
+        createdAt: { gte: startOfCurrentMonth() },
+      },
+      _sum: { quantity: true },
+    });
+
+    const monthlyConsumed = monthlyAggregate._sum.quantity ?? new Prisma.Decimal(0);
+    const remainingLimit = member.monthlyLimit.sub(monthlyConsumed);
+
+    // 4. Validaciones — lanza errores tipados para el frontend
+    if (product.stockLevel.lessThan(qty)) {
+      throw new DispensationError(
+        "OUT_OF_STOCK",
+        `Stock insuficiente. Disponible: ${product.stockLevel}${product.unit}`
+      );
+    }
     if (member.walletBalance.lessThan(cost)) {
-      throw new Error(`Saldo insuficiente. Necesario: ${cost}, Disponible: ${member.walletBalance}`);
+      throw new DispensationError(
+        "INSUFFICIENT_FUNDS",
+        `Saldo insuficiente. Necesario: ${cost}€, Disponible: ${member.walletBalance}€`
+      );
     }
     if (remainingLimit.lessThan(qty)) {
-      throw new Error(`Límite mensual superado. Disponible: ${remainingLimit}g, Solicitado: ${qty}g`);
-    }
-    if (product.stockLevel.lessThan(qty)) {
-      throw new Error(`Stock insuficiente. Disponible: ${product.stockLevel}${product.unit}`);
+      throw new DispensationError(
+        "LIMIT_EXCEEDED",
+        `Límite mensual superado. Disponible: ${remainingLimit}${product.unit}`
+      );
     }
 
     const balanceBefore = member.walletBalance;
     const balanceAfter = balanceBefore.sub(cost);
 
-    // 4. Actualizar stock
+    // 5. Escritura atómica
     await tx.product.update({
       where: { id: data.productId },
       data: { stockLevel: { decrement: qty } },
     });
 
-    // 5. Actualizar wallet + monthly_spent
     await tx.member.update({
       where: { id: data.memberId },
       data: {
@@ -108,7 +153,6 @@ export async function dispense(input: DispenseInput) {
       },
     });
 
-    // 6. Insertar ledger entry
     return tx.transaction.create({
       data: {
         organizationId,

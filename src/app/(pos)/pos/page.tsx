@@ -61,12 +61,24 @@ export default function POSPage() {
     setPOS({ step: "dispensing", member: pos.member, product: pos.product, quantity });
 
     try {
-      const { dispense } = await import("@/lib/wallet/actions");
-      await dispense({ memberId: pos.member.id, productId: pos.product.id, quantity });
-      toast.success(`Dispensado: ${quantity}${pos.product.unit} de ${pos.product.name}`);
+      const { processDispensation, DispensationError } = await import("@/lib/wallet/actions");
+      await processDispensation({ memberId: pos.member.id, productId: pos.product.id, quantity });
+      toast.success(`${pos.product.name} · ${quantity}${pos.product.unit}`);
       setPOS({ step: "idle" });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al dispensar");
+      const { DispensationError } = await import("@/lib/wallet/actions");
+      if (err instanceof DispensationError) {
+        const messages: Record<string, string> = {
+          INSUFFICIENT_FUNDS: "Saldo insuficiente",
+          OUT_OF_STOCK: "Sin stock",
+          LIMIT_EXCEEDED: "Límite mensual alcanzado",
+          MEMBER_BLOCKED: "Socio bloqueado",
+          MEMBER_EXPIRED: "Membresía expirada",
+        };
+        toast.error(messages[err.code] ?? err.message);
+      } else {
+        toast.error(err instanceof Error ? err.message : "Error en la operación");
+      }
       setPOS({ step: "member_loaded", member: pos.member, status: "denied" });
     } finally {
       setIsProcessing(false);
