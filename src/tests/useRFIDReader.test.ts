@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { normalizeRFIDTag, isValidRFIDTag } from "@/lib/rfid/normalize";
 
 // El hook usa APIs de browser (window, navigator.serial) — testeamos

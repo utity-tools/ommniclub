@@ -97,7 +97,7 @@ export function useRFIDReader({
         }, keyboardDebounceMs * 5);
       }
     },
-    [mode, suffix, prefix, keyboardDebounceMs, onRead, onError]
+    [suffix, prefix, keyboardDebounceMs, onRead, onError]
   );
 
   // ─── SERIAL MODE ────────────────────────────────────────────────────────────
@@ -158,15 +158,18 @@ export function useRFIDReader({
 
   // ─── LIFECYCLE ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (mode === "keyboard") {
-      setStatus("listening");
-      window.addEventListener("keydown", handleKeyDown);
-      return () => {
-        window.removeEventListener("keydown", handleKeyDown);
-        if (timerRef.current) clearTimeout(timerRef.current);
-        setStatus("idle");
-      };
-    }
+    if (mode !== "keyboard") return;
+
+    // Programar el setStatus fuera del cuerpo síncrono del efecto
+    const id = setTimeout(() => setStatus("listening"), 0);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener("keydown", handleKeyDown);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setStatus("idle");
+    };
   }, [mode, handleKeyDown]);
 
   return {
