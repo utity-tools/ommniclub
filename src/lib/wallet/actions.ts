@@ -82,7 +82,7 @@ export async function processDispensation(input: DispenseInput) {
 
     if (!member) throw new DispensationError("MEMBER_BLOCKED", "Socio no encontrado en esta organización");
 
-    if (member.status === MemberStatus.BLOCKED) {
+    if (member.status === MemberStatus.SUSPENDED) {
       throw new DispensationError("MEMBER_BLOCKED", "El socio está bloqueado");
     }
     if (

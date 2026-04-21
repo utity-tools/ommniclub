@@ -126,8 +126,8 @@ describe("processDispensation — errores tipados", () => {
     await expect(processDispensation(input)).rejects.toMatchObject({ code: "LIMIT_EXCEEDED" });
   });
 
-  it("lanza MEMBER_BLOCKED si el socio está bloqueado", async () => {
-    mockTx.member.findUnique.mockResolvedValue({ ...activeMember, status: MemberStatus.BLOCKED });
+  it("lanza MEMBER_BLOCKED si el socio está suspendido", async () => {
+    mockTx.member.findUnique.mockResolvedValue({ ...activeMember, status: MemberStatus.SUSPENDED });
     await expect(processDispensation(input)).rejects.toMatchObject({ code: "MEMBER_BLOCKED" });
   });
 
