@@ -124,6 +124,7 @@ export async function listMembers(page = 1, pageSize = 20) {
         id: true,
         firstName: true,
         lastName: true,
+        email: true,
         status: true,
         walletBalance: true,
         rfidTag: true,
