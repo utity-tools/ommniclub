@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { prisma } from "@/lib/prisma";
 import { getPrismaForOrg } from "@/lib/prisma";
 
-const mockPrisma = vi.mocked(prisma);
+// Extraemos los fns del mock definido en setup.ts para poder tiparlos correctamente
+const { prisma } = await vi.importMock<typeof import("@/lib/prisma")>("@/lib/prisma");
+
+const mockOrgCreate = prisma.organization.create as ReturnType<typeof vi.fn>;
+const mockMemberCreate = prisma.member.create as ReturnType<typeof vi.fn>;
+const mockGetOrg = getPrismaForOrg as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -12,9 +16,8 @@ describe("Multi-tenant schema isolation", () => {
   const ORG_ID = "org_test_123";
 
   it("getPrismaForOrg devuelve un cliente extendido", async () => {
-    const mockGetOrg = vi.mocked(getPrismaForOrg);
     const fakePrismaForOrg = { member: { findMany: vi.fn() } };
-    mockGetOrg.mockResolvedValueOnce(fakePrismaForOrg as never);
+    mockGetOrg.mockResolvedValueOnce(fakePrismaForOrg);
 
     const orgDb = await getPrismaForOrg(ORG_ID);
     expect(orgDb).toBeDefined();
@@ -33,7 +36,7 @@ describe("Multi-tenant schema isolation", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    mockPrisma.organization.create.mockResolvedValueOnce(mockOrg as never);
+    mockOrgCreate.mockResolvedValueOnce(mockOrg);
 
     const org = await prisma.organization.create({
       data: { clerkOrgId: "org_clerk_1", name: "Cannabis Club BCN", slug: "ccbcn" },
@@ -61,7 +64,7 @@ describe("Multi-tenant schema isolation", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    mockPrisma.member.create.mockResolvedValueOnce(mockMember as never);
+    mockMemberCreate.mockResolvedValueOnce(mockMember);
 
     const member = await prisma.member.create({
       data: {
@@ -81,7 +84,6 @@ describe("Multi-tenant schema isolation", () => {
 
 describe("Prisma schema: enums", () => {
   it("TransactionType incluye DISPENSE y WALLET_TOPUP", () => {
-    // Verificamos que el enum está en el schema generado
     const validTypes = [
       "DISPENSE",
       "WALLET_TOPUP",
@@ -90,7 +92,6 @@ describe("Prisma schema: enums", () => {
       "REFUND",
       "ADJUSTMENT",
     ];
-    // Si el schema no compila, este test fallará en tiempo de build
     expect(validTypes).toContain("DISPENSE");
     expect(validTypes).toContain("WALLET_TOPUP");
   });
