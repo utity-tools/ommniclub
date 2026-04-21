@@ -6,22 +6,7 @@ import { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
-
-// ─── ERROR TIPADO ─────────────────────────────────────────────────────────────
-
-export type DispensationErrorCode =
-  | "INSUFFICIENT_FUNDS"
-  | "OUT_OF_STOCK"
-  | "LIMIT_EXCEEDED"
-  | "MEMBER_BLOCKED"
-  | "MEMBER_EXPIRED";
-
-export class DispensationError extends Error {
-  constructor(public readonly code: DispensationErrorCode, message: string) {
-    super(message);
-    this.name = "DispensationError";
-  }
-}
+import { DispensationError } from "./errors";
 
 // ─── SCHEMAS ─────────────────────────────────────────────────────────────────
 

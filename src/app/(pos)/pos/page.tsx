@@ -61,12 +61,12 @@ export default function POSPage() {
     setPOS({ step: "dispensing", member: pos.member, product: pos.product, quantity });
 
     try {
-      const { processDispensation, DispensationError } = await import("@/lib/wallet/actions");
+      const { processDispensation } = await import("@/lib/wallet/actions");
       await processDispensation({ memberId: pos.member.id, productId: pos.product.id, quantity });
       toast.success(`${pos.product.name} · ${quantity}${pos.product.unit}`);
       setPOS({ step: "idle" });
     } catch (err) {
-      const { DispensationError } = await import("@/lib/wallet/actions");
+      const { DispensationError } = await import("@/lib/wallet/errors");
       if (err instanceof DispensationError) {
         const messages: Record<string, string> = {
           INSUFFICIENT_FUNDS: "Saldo insuficiente",

@@ -27,7 +27,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-const { processDispensation, DispensationError } = await import("@/lib/wallet/actions");
+const { processDispensation } = await import("@/lib/wallet/actions");
+const { DispensationError } = await import("@/lib/wallet/errors");
 
 // ─── FIXTURES ────────────────────────────────────────────────────────────────
 
