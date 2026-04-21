@@ -11,57 +11,38 @@ type Props = {
 };
 
 const STATUS_CONFIG = {
-  idle: { label: "Lector inactivo", color: "bg-gray-200 text-gray-600", pulse: false },
-  listening: { label: "Esperando tarjeta...", color: "bg-blue-100 text-blue-700", pulse: true },
-  reading: { label: "Leyendo...", color: "bg-yellow-100 text-yellow-700", pulse: true },
-  error: { label: "Error de lectura", color: "bg-red-100 text-red-700", pulse: false },
+  idle:      { label: "Lector inactivo",    pill: "bg-gray-200 text-gray-600",  dot: "bg-gray-400",  pulse: false },
+  listening: { label: "Esperando tarjeta…", pill: "bg-blue-100 text-blue-700",  dot: "bg-blue-500",  pulse: true  },
+  reading:   { label: "Leyendo…",           pill: "bg-yellow-100 text-yellow-700", dot: "bg-yellow-500", pulse: true  },
+  error:     { label: "Error de lectura",   pill: "bg-red-100 text-red-700",    dot: "bg-red-500",   pulse: false },
 } as const;
 
 export function RFIDStatusIndicator({ mode = "keyboard", onRead, onError, className }: Props) {
   const { status, startSerial, stopSerial } = useRFIDReader({ mode, onRead, onError });
-  const cfg = STATUS_CONFIG[status];
+  const { label, pill, dot, pulse } = STATUS_CONFIG[status];
+  const isDisconnected = status === "idle" || status === "error";
 
   return (
     <div className={cn("flex flex-col items-center gap-3", className)}>
       <div
-        className={cn(
-          "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all",
-          cfg.color,
-          cfg.pulse && "animate-pulse"
-        )}
+        className={cn("flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all", pill, pulse && "animate-pulse")}
         role="status"
         aria-live="polite"
       >
-        <span
-          className={cn(
-            "h-2 w-2 rounded-full",
-            status === "idle" && "bg-gray-400",
-            status === "listening" && "bg-blue-500",
-            status === "reading" && "bg-yellow-500",
-            status === "error" && "bg-red-500"
-          )}
-        />
-        {cfg.label}
+        <span className={cn("h-2 w-2 rounded-full", dot)} />
+        {label}
       </div>
 
       {mode === "serial" && (
-        <div className="flex gap-2">
-          {status === "idle" || status === "error" ? (
-            <button
-              onClick={startSerial}
-              className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
-            >
-              Conectar lector serial
-            </button>
-          ) : (
-            <button
-              onClick={stopSerial}
-              className="rounded bg-gray-600 px-3 py-1 text-xs text-white hover:bg-gray-700"
-            >
-              Desconectar
-            </button>
+        <button
+          onClick={isDisconnected ? startSerial : stopSerial}
+          className={cn(
+            "rounded px-3 py-1 text-xs text-white",
+            isDisconnected ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-600 hover:bg-gray-700"
           )}
-        </div>
+        >
+          {isDisconnected ? "Conectar lector serial" : "Desconectar"}
+        </button>
       )}
     </div>
   );

@@ -14,33 +14,39 @@ export type RFIDReadResult = {
 
 export type RFIDReaderStatus = "idle" | "listening" | "reading" | "error";
 
+export const RFID_DEFAULTS = {
+  BAUD_RATE: 9600,
+  KEYBOARD_DEBOUNCE_MS: 80,
+  SUFFIX: "Enter",
+  PREFIX: "",
+} as const;
+
 type UseRFIDReaderOptions = {
   mode?: RFIDReaderMode;
-  /** Tiempo máximo en ms para acumular caracteres de un tag (teclado mode) */
   keyboardDebounceMs?: number;
-  /** Prefijo que envían algunos lectores antes del tag (ej: STX byte) */
   prefix?: string;
-  /** Sufijo que envían algunos lectores tras el tag (ej: Enter, ETX) */
   suffix?: string;
   onRead: (result: RFIDReadResult) => void;
   onError?: (error: Error) => void;
 };
 
-/**
- * Hook para capturar lecturas RFID desde dispositivos USB.
- *
- * Soporta dos modos:
- * - keyboard: El lector emula un teclado y envía el tag como keystrokes.
- *   Es el modo más común en lectores genéricos de bajo coste.
- * - serial: Usa Web Serial API para lectores con protocolo propio.
- *
- * El objetivo de latencia es <200ms desde pasada del tag hasta callback.
- */
+const INPUT_TAGS = new Set(["INPUT", "TEXTAREA"]);
+
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function processTag(raw: string, mode: RFIDReaderMode): RFIDReadResult {
+  const normalized = normalizeRFIDTag(raw);
+  if (!isValidRFIDTag(normalized)) throw new Error("Tag inválido");
+  return { raw, normalized, mode, timestamp: Date.now() };
+}
+
 export function useRFIDReader({
   mode = "keyboard",
-  keyboardDebounceMs = 80,
-  prefix = "",
-  suffix = "Enter",
+  keyboardDebounceMs = RFID_DEFAULTS.KEYBOARD_DEBOUNCE_MS,
+  prefix = RFID_DEFAULTS.PREFIX,
+  suffix = RFID_DEFAULTS.SUFFIX,
   onRead,
   onError,
 }: UseRFIDReaderOptions) {
@@ -53,43 +59,29 @@ export function useRFIDReader({
   // ─── KEYBOARD MODE ──────────────────────────────────────────────────────────
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      // Ignorar si el foco está en un input normal del usuario
       const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
-        return;
-      }
+      if (INPUT_TAGS.has(target.tagName) || target.isContentEditable) return;
 
       if (e.key === suffix || e.key === "Enter") {
         const raw = bufferRef.current;
         bufferRef.current = "";
         if (timerRef.current) clearTimeout(timerRef.current);
-
         if (!raw) return;
 
         const trimmed = prefix ? raw.replace(prefix, "") : raw;
-
         try {
-          const normalized = normalizeRFIDTag(trimmed);
-          if (!isValidRFIDTag(normalized)) throw new Error("Tag inválido");
-
+          onRead(processTag(trimmed, "keyboard"));
           setStatus("idle");
-          onRead({ raw: trimmed, normalized, mode: "keyboard", timestamp: Date.now() });
         } catch (err) {
-          onError?.(err instanceof Error ? err : new Error(String(err)));
+          onError?.(toError(err));
         }
         return;
       }
 
-      // Acumular caracteres del tag en el buffer
       if (e.key.length === 1) {
         if (bufferRef.current === "") setStatus("reading");
         bufferRef.current += e.key;
 
-        // Reset automático si el lector se cuelga sin enviar sufijo
         if (timerRef.current) clearTimeout(timerRef.current);
         timerRef.current = setTimeout(() => {
           bufferRef.current = "";
@@ -108,11 +100,10 @@ export function useRFIDReader({
     }
     try {
       const port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 9600 });
+      await port.open({ baudRate: RFID_DEFAULTS.BAUD_RATE });
       serialPortRef.current = port;
 
       const decoder = new TextDecoderStream();
-      // BufferSource compat: TextDecoderStream.writable accepts ArrayBufferView at runtime
       (port.readable as ReadableStream<Uint8Array>).pipeTo(
         decoder.writable as unknown as WritableStream<Uint8Array>
       );
@@ -127,24 +118,20 @@ export function useRFIDReader({
         if (done) break;
         serialBuffer += value;
 
-        // Los lectores seriales terminan el tag con \r o \n
         if (serialBuffer.includes("\r") || serialBuffer.includes("\n")) {
           const raw = serialBuffer.replace(/[\r\n]/g, "").trim();
           serialBuffer = "";
-
           if (!raw) continue;
           try {
-            const normalized = normalizeRFIDTag(raw);
-            if (!isValidRFIDTag(normalized)) throw new Error("Tag inválido");
-            onRead({ raw, normalized, mode: "serial", timestamp: Date.now() });
+            onRead(processTag(raw, "serial"));
           } catch (err) {
-            onError?.(err instanceof Error ? err : new Error(String(err)));
+            onError?.(toError(err));
           }
         }
       }
     } catch (err) {
       setStatus("error");
-      onError?.(err instanceof Error ? err : new Error(String(err)));
+      onError?.(toError(err));
     }
   }, [onRead, onError]);
 
@@ -160,7 +147,6 @@ export function useRFIDReader({
   useEffect(() => {
     if (mode !== "keyboard") return;
 
-    // Programar el setStatus fuera del cuerpo síncrono del efecto
     const id = setTimeout(() => setStatus("listening"), 0);
     window.addEventListener("keydown", handleKeyDown);
 
@@ -172,10 +158,5 @@ export function useRFIDReader({
     };
   }, [mode, handleKeyDown]);
 
-  return {
-    status,
-    /** Solo disponible en modo serial */
-    startSerial,
-    stopSerial,
-  };
+  return { status, startSerial, stopSerial };
 }
