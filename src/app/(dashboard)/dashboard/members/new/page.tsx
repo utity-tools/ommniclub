@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
+import { createMember } from "@/lib/members/actions";
 
 export default function NewMemberPage() {
   const router = useRouter();
@@ -27,7 +28,6 @@ export default function NewMemberPage() {
     };
 
     try {
-      const { createMember } = await import("@/lib/members/actions");
       await createMember(input as never);
       toast.success("Socio creado correctamente");
       router.push("/dashboard/members");
