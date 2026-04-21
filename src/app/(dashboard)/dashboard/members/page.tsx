@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { listMembers } from "@/lib/members/actions";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
 export default async function MembersPage() {
   const { members } = await listMembers(1, 50);
@@ -10,9 +9,12 @@ export default async function MembersPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Socios</h1>
-        <Button asChild>
-          <Link href="/dashboard/members/new">+ Nuevo socio</Link>
-        </Button>
+        <Link
+          href="/dashboard/members/new"
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
+        >
+          + Nuevo socio
+        </Link>
       </div>
 
       <div className="rounded-xl border bg-white overflow-hidden">
